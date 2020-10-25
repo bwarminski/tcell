@@ -19,10 +19,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	okos "os"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -717,8 +719,76 @@ func AddTerminfo(t *Terminfo) {
 	dblock.Unlock()
 }
 
+type TerminfoOptionType int
+
+const (
+	DontUseEnv TerminfoOptionType = iota
+	SetEnv
+	UseRemoteConsole
+)
+
+type TerminfoOption struct {
+	Type  TerminfoOptionType
+	Value interface{}
+}
+
+type RemoteConsole struct {
+	In               *okos.File
+	Out              *okos.File
+	sigwinch         chan RemoteDimensions
+	LatestDimensions atomic.Value
+}
+
+func (r RemoteConsole) Subscribe(signal chan okos.Signal) {
+	go func() {
+		for {
+			msg, ok := <-r.sigwinch
+			if !ok {
+				break
+			}
+			r.LatestDimensions.Store(msg)
+			signal <- syscall.SIGWINCH
+		}
+	}()
+}
+
+func (r RemoteConsole) Stop() {
+	close(r.sigwinch)
+}
+
+type RemoteDimensions struct {
+	Rows    int
+	Columns int
+}
+
+func EnvFromOptions(key string, options []TerminfoOption) string {
+	lookupenv := true
+	extraEnv := make(map[string]string)
+	for _, o := range options {
+		if o.Type == DontUseEnv {
+			lookupenv = false
+		} else if o.Type == SetEnv {
+			extraEnv = o.Value.(map[string]string)
+		}
+	}
+	if lookupenv {
+		return okos.Getenv(key)
+	} else {
+		return extraEnv[key]
+	}
+}
+
+func RemoteConsoleFromOptions(options []TerminfoOption) *RemoteConsole {
+	for _, o := range options {
+		if o.Type == UseRemoteConsole {
+			return o.Value.(*RemoteConsole)
+		}
+	}
+	return nil
+}
+
 // LookupTerminfo attempts to find a definition for the named $TERM.
-func LookupTerminfo(name string) (*Terminfo, error) {
+func LookupTerminfo(name string, options ...TerminfoOption) (*Terminfo, error) {
 	if name == "" {
 		// else on windows: index out of bounds
 		// on the name[0] reference below
@@ -726,7 +796,7 @@ func LookupTerminfo(name string) (*Terminfo, error) {
 	}
 
 	addtruecolor := false
-	switch os.Getenv("COLORTERM") {
+	switch EnvFromOptions("COLORTERM", options) {
 	case "truecolor", "24bit", "24-bit":
 		addtruecolor = true
 	}
@@ -757,7 +827,7 @@ func LookupTerminfo(name string) (*Terminfo, error) {
 		return nil, ErrTermNotFound
 	}
 
-	switch os.Getenv("TCELL_TRUECOLOR") {
+	switch EnvFromOptions("TCELL_TRUECOLOR", options) {
 	case "":
 	case "disable":
 		addtruecolor = false

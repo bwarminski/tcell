@@ -17,7 +17,7 @@ package tcell
 import (
 	"bytes"
 	"io"
-	"os"
+	okos "os"
 	"strconv"
 	"sync"
 	"time"
@@ -39,10 +39,10 @@ import (
 // For terminals that do not support dynamic resize events, the $LINES
 // $COLUMNS environment variables can be set to the actual window size,
 // otherwise defaults taken from the terminal database are used.
-func NewTerminfoScreen() (Screen, error) {
-	ti, e := terminfo.LookupTerminfo(os.Getenv("TERM"))
+func NewTerminfoScreen(options ...terminfo.TerminfoOption) (Screen, error) {
+	ti, e := terminfo.LookupTerminfo(terminfo.EnvFromOptions("TERM", options))
 	if e != nil {
-		ti, e = loadDynamicTerminfo(os.Getenv("TERM"))
+		ti, e = loadDynamicTerminfo(terminfo.EnvFromOptions("TERM", options))
 		if e != nil {
 			return nil, e
 		}
@@ -57,11 +57,12 @@ func NewTerminfoScreen() (Screen, error) {
 	}
 	t.prepareKeys()
 	t.buildAcsMap()
-	t.sigwinch = make(chan os.Signal, 10)
+	t.sigwinch = make(chan okos.Signal, 10)
 	t.fallback = make(map[rune]string)
 	for k, v := range RuneFallbacks {
 		t.fallback[k] = v
 	}
+	t.options = options
 
 	return t, nil
 }
@@ -79,14 +80,14 @@ type tScreen struct {
 	w         int
 	fini      bool
 	cells     CellBuffer
-	in        *os.File
-	out       *os.File
+	in        *okos.File
+	out       *okos.File
 	buffering bool // true if we are collecting writes to buf instead of sending directly to out
 	buf       bytes.Buffer
 	curstyle  Style
 	style     Style
 	evch      chan Event
-	sigwinch  chan os.Signal
+	sigwinch  chan okos.Signal
 	quit      chan struct{}
 	indoneq   chan struct{}
 	keyexist  map[Key]bool
@@ -112,7 +113,8 @@ type tScreen struct {
 	truecolor bool
 	escaped   bool
 	buttondn  bool
-
+	options   []terminfo.TerminfoOption
+	remote    *terminfo.RemoteConsole
 	sync.Mutex
 }
 
@@ -123,7 +125,7 @@ func (t *tScreen) Init() error {
 	t.keytimer = time.NewTimer(time.Millisecond * 50)
 	t.charset = "UTF-8"
 
-	t.charset = getCharset()
+	t.charset = getCharset(t.options...)
 	if enc := GetEncoding(t.charset); enc != nil {
 		t.encoder = enc.NewEncoder()
 		t.decoder = enc.NewDecoder()
@@ -135,12 +137,13 @@ func (t *tScreen) Init() error {
 	// environment overrides
 	w := ti.Columns
 	h := ti.Lines
-	if i, _ := strconv.Atoi(os.Getenv("LINES")); i != 0 {
+	if i, _ := strconv.Atoi(terminfo.EnvFromOptions("LINES", t.options)); i != 0 {
 		h = i
 	}
-	if i, _ := strconv.Atoi(os.Getenv("COLUMNS")); i != 0 {
+	if i, _ := strconv.Atoi(terminfo.EnvFromOptions("COLUMNS", t.options)); i != 0 {
 		w = i
 	}
+	t.remote = terminfo.RemoteConsoleFromOptions(t.options)
 	if e := t.termioInit(); e != nil {
 		return e
 	}
@@ -150,7 +153,7 @@ func (t *tScreen) Init() error {
 	}
 	// A user who wants to have his themes honored can
 	// set this environment variable.
-	if os.Getenv("TCELL_TRUECOLOR") == "disable" {
+	if terminfo.EnvFromOptions("TCELL_TRUECOLOR", t.options) == "disable" {
 		t.truecolor = false
 	}
 	if !t.truecolor {

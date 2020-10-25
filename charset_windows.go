@@ -16,6 +16,8 @@
 
 package tcell
 
-func getCharset() string {
+import "github.com/gdamore/tcell/terminfo"
+
+func getCharset(_ ...terminfo.TerminfoOption) string {
 	return "UTF-16"
 }

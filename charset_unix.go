@@ -17,18 +17,18 @@
 package tcell
 
 import (
-	"os"
+	"github.com/gdamore/tcell/terminfo"
 	"strings"
 )
 
-func getCharset() string {
+func getCharset(options ...terminfo.TerminfoOption) string {
 	// Determine the character set.  This can help us later.
 	// Per POSIX, we search for LC_ALL first, then LC_CTYPE, and
 	// finally LANG.  First one set wins.
 	locale := ""
-	if locale = os.Getenv("LC_ALL"); locale == "" {
-		if locale = os.Getenv("LC_CTYPE"); locale == "" {
-			locale = os.Getenv("LANG")
+	if locale = terminfo.EnvFromOptions("LC_ALL", options); locale == "" {
+		if locale = terminfo.EnvFromOptions("LC_CTYPE", options); locale == "" {
+			locale = terminfo.EnvFromOptions("LANG", options)
 		}
 	}
 	if locale == "POSIX" || locale == "C" {
