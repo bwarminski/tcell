@@ -23,8 +23,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -733,27 +731,9 @@ type TerminfoOption struct {
 }
 
 type RemoteConsole struct {
-	In               *okos.File
-	Out              *okos.File
-	sigwinch         chan RemoteDimensions
-	LatestDimensions atomic.Value
-}
-
-func (r RemoteConsole) Subscribe(signal chan okos.Signal) {
-	go func() {
-		for {
-			msg, ok := <-r.sigwinch
-			if !ok {
-				break
-			}
-			r.LatestDimensions.Store(msg)
-			signal <- syscall.SIGWINCH
-		}
-	}()
-}
-
-func (r RemoteConsole) Stop() {
-	close(r.sigwinch)
+	In       *okos.File
+	Out      *okos.File
+	Sigwinch chan okos.Signal
 }
 
 type RemoteDimensions struct {
